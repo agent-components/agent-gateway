@@ -2,6 +2,27 @@
 
 本机 Agent HTTP 网关（NestJS）。一键二进制启动；按挂载的 Provider 配置对应密钥。
 
+## 背景与动机
+
+我们要在本机起一个服务，让第三方按固定 HTTP 协议调用，背后可挂 Cursor、千问等多家 harness，并附带 Web 调试界面方便联调。业界已有 [ACP](https://agentclientprotocol.com/) 做 Client ↔ Agent 的标准会话；本项目选择另一条形状，差异见下。
+
+### 与 ACP 对比
+
+| 维度 | ACP | agent-gateway |
+|------|-----|---------------|
+| 角色 | Client 与单个 Agent 对等对话 | 本机网关：调用方 → Gateway → 多家 Provider |
+| 交互 | JSON-RPC，可双向（含权限审批） | REST + SSE，单向控制面（create / resume / connect / steer / cancel） |
+| 权限 | Agent 可 `request_permission`，由 Client 审批 | 不需要权限环；策略留在各 harness |
+| 连接心智 | 会话式长连接（stdio / WebSocket / Streamable HTTP） | 普通 HTTP 多请求并行，互不占用一条会话管道 |
+| 多厂家 | 各家各自当 ACP Agent，Client 分别连 | 一个进程内挂多个 Provider，对外一份 API |
+| 中途注入（steer） | 协议侧尚在演进；**Cursor 的 ACP（`agent acp`）目前不支持 steer** | 一等能力：`POST /api/v1/chat/steer`（经 Cursor SDK 等 Provider 注入进行中的 run） |
+| 调试体验 | 依赖 IDE / ACP Client | 自带 Web 调试页（`public/`，启动后浏览器打开） |
+| 典型调用方 | IDE、ACP Client | curl、脚本、CI、内部平台、自有前端 |
+
+一句话：ACP 适合「标准方式连上 Agent」；这里适合「本机一个 HTTP 口、无权限环、多 harness、能 steer、带 Web 调试页」。尤其对 Cursor，走 ACP 目前拿不到中途注入，网关通过 SDK 把 steer 暴露成稳定 HTTP。二者目标层不同，因此不实现 ACP。
+
+> **关于 Cursor SDK 与 Web 调试页：** `@cursor/sdk` 提供 create / stream / steer（本地 run）/ cancel 等能力，足以支撑调试 UI 所需交互，但它是 **Node ≥ 22.13 专用**，不能在浏览器里直接跑。因此调试页必须经本机 HTTP 网关（本项目）再挂静态前端，而不是把 SDK 打进浏览器。
+
 ## 一键启动
 
 ```bash
