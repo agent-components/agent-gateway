@@ -1,4 +1,3 @@
 # GitHub Release 会强制附带 Source code (zip/tar.gz)，无法关闭。
-# 用 export-ignore 让自动源码包不含项目文件，实际产物只靠上传的二进制。
+# 清空自动源码包；实际产物只靠 CI 上传的二进制。
 * export-ignore
-!.gitattributes
