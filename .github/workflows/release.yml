@@ -42,10 +42,6 @@ jobs:
         with:
           generate_release_notes: true
           fail_on_unmatched_files: true
-          body: |
-            下载 **agent-gateway** 二进制即可（linux-x64，需系统 Node ≥ 22.13）。
-
-            > GitHub 会固定显示 Source code 链接，无法关闭；本仓库已用 `.gitattributes` 清空自动源码包内容，请只用上方二进制资源。
           files: |
             release/agent-gateway
             release/agent-gateway.sha256

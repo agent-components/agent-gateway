@@ -40,8 +40,6 @@ export CURSOR_API_KEY=cursor_...
 
 依赖：系统 **Node ≥ 22.13**（产物内嵌 `@cursor/sdk` 的平台原生依赖；当前发布包面向 linux-x64）。
 
-> GitHub Release 页会固定出现 Source code zip/tar（平台限制，无法去掉）；仓库用 `.gitattributes` 清空了自动源码包，请只下载 `agent-gateway` 资源。
-
 默认监听：`http://0.0.0.0:6090`  
 机器可读契约：`GET /openapi.json`
 

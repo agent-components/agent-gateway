@@ -1,3 +1,0 @@
-# GitHub Release 会强制附带 Source code (zip/tar.gz)，无法关闭。
-# 清空自动源码包；实际产物只靠 CI 上传的二进制。
-* export-ignore
