@@ -1,6 +1,6 @@
 {
   "name": "agent-gateway",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Local agent HTTP gateway (NestJS)",
   "private": true,
   "type": "module",
