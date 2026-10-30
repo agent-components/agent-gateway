@@ -716,7 +716,7 @@
         return prev.concat([{ id: "local-" + Date.now(), role: "user", content: text }]);
       });
 
-      // Mid-run: inject via steer, keep existing SSE alive.
+      // Frontend-only: same session + busy/streaming → steer; keep SSE alive.
       if (activeId && shouldSteer()) {
         try {
           const result = await AgentHttpApi.chatSteer({
@@ -725,10 +725,11 @@
           });
           if (result && result.outcome === "revert_to_followup") {
             message.info("当前无法 steer，改为续聊");
-            if (!streaming) {
+            if (!streamingRef.current) {
               await runPromptRequest(text);
             }
-          } else if (!streaming) {
+          } else if (!streamingRef.current) {
+            // Session marked busy but we are not attached — reconnect.
             await attachConnect(activeId);
           }
           await refreshSessions(cwd);
@@ -738,7 +739,6 @@
         return;
       }
 
-      if (streaming) return;
       await runPromptRequest(text);
     }
 
@@ -1150,8 +1150,9 @@
                 className: "composer-input",
                 rows: 3,
                 value: prompt,
-                placeholder: "Plan, @ for context, / for commands",
-                disabled: streaming,
+                placeholder: streaming
+                  ? "继续输入将作为 steer 注入…"
+                  : "Plan, @ for context, / for commands",
                 onChange: function (ev) {
                   setPrompt(ev.target.value);
                 },
@@ -1165,54 +1166,40 @@
               e(
                 "div",
                 { className: "composer-toolbar" },
-                e("span", { className: "composer-hint" }, "Enter 发送 · Shift+Enter 换行"),
-                streaming
-                  ? e(
-                      "button",
-                      {
-                        type: "button",
-                        className: "composer-send is-stop",
-                        title: "停止",
-                        onClick: onCancel,
-                      },
-                      e(
-                        "svg",
-                        {
-                          viewBox: "0 0 16 16",
-                          width: 14,
-                          height: 14,
-                          "aria-hidden": "true",
-                        },
-                        e("rect", { x: 4, y: 4, width: 8, height: 8, rx: 1.5 }),
-                      ),
-                    )
-                  : e(
-                      "button",
-                      {
-                        type: "button",
-                        className: "composer-send",
-                        title: "发送",
-                        disabled: !prompt.trim(),
-                        onClick: onSend,
-                      },
-                      e(
-                        "svg",
-                        {
-                          viewBox: "0 0 16 16",
-                          width: 14,
-                          height: 14,
-                          "aria-hidden": "true",
-                        },
-                        e("path", {
-                          d: "M8 3.2v9.6M8 3.2 4.4 6.8M8 3.2l3.6 3.6",
-                          fill: "none",
-                          stroke: "currentColor",
-                          "stroke-width": 1.7,
-                          "stroke-linecap": "round",
-                          "stroke-linejoin": "round",
-                        }),
-                      ),
-                    ),
+                e(
+                  "span",
+                  { className: "composer-hint" },
+                  streaming
+                    ? "Enter 发送为 steer · Shift+Enter 换行"
+                    : "Enter 发送 · Shift+Enter 换行",
+                ),
+                e(
+                  "button",
+                  {
+                    type: "button",
+                    className: "composer-send",
+                    title: streaming ? "Steer" : "发送",
+                    disabled: !prompt.trim(),
+                    onClick: onSend,
+                  },
+                  e(
+                    "svg",
+                    {
+                      viewBox: "0 0 16 16",
+                      width: 14,
+                      height: 14,
+                      "aria-hidden": "true",
+                    },
+                    e("path", {
+                      d: "M8 3.2v9.6M8 3.2 4.4 6.8M8 3.2l3.6 3.6",
+                      fill: "none",
+                      stroke: "currentColor",
+                      "stroke-width": 1.7,
+                      "stroke-linecap": "round",
+                      "stroke-linejoin": "round",
+                    }),
+                  ),
+                ),
               ),
             ),
           ),
