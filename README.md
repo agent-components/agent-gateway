@@ -34,11 +34,13 @@ export CURSOR_API_KEY=cursor_...
 ./release/agent-gateway
 ```
 
-或从 [GitHub Releases](https://github.com/agent-components/agent-gateway/releases) 下载对应平台产物（如 `agent-gateway-linux-x64`），赋予执行权限后直接跑。打 `v*` tag 并 push 会自动构建并挂上二进制。
+或从 [GitHub Releases](https://github.com/agent-components/agent-gateway/releases) 下载 **agent-gateway** 二进制（当前 CI：linux-x64）。打 `v*` tag 并 push 会自动构建并挂上该文件。
 
 打开终端打印的 UI。未设 `AGENT_GATEWAY_TOKEN` 时会自动生成。
 
-依赖：系统 **Node ≥ 22.13**（产物内嵌 `@cursor/sdk` 的平台原生依赖，请下载与机器匹配的 asset）。
+依赖：系统 **Node ≥ 22.13**（产物内嵌 `@cursor/sdk` 的平台原生依赖；当前发布包面向 linux-x64）。
+
+> GitHub Release 页会固定出现 Source code zip/tar（平台限制，无法去掉）；仓库用 `.gitattributes` 清空了自动源码包，请只下载 `agent-gateway` 资源。
 
 默认监听：`http://0.0.0.0:6090`  
 机器可读契约：`GET /openapi.json`

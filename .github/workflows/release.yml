@@ -9,17 +9,8 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    name: Build ${{ matrix.asset }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            asset: agent-gateway-linux-x64
-          - os: macos-latest
-            asset: agent-gateway-darwin-arm64
+  release:
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -39,44 +30,22 @@ jobs:
       - name: Pack binary
         run: pnpm pack:bin
 
-      - name: Rename asset
-        run: mv release/agent-gateway "release/${{ matrix.asset }}"
-
-      - name: Checksum
+      - name: Verify artifact
         run: |
-          cd release
-          if command -v sha256sum >/dev/null; then
-            sha256sum "${{ matrix.asset }}" > "${{ matrix.asset }}.sha256"
-          else
-            shasum -a 256 "${{ matrix.asset }}" > "${{ matrix.asset }}.sha256"
-          fi
+          test -f release/agent-gateway
+          test -x release/agent-gateway
+          ls -lh release/agent-gateway
+          sha256sum release/agent-gateway > release/agent-gateway.sha256
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ matrix.asset }}
-          path: |
-            release/${{ matrix.asset }}
-            release/${{ matrix.asset }}.sha256
-
-  github-release:
-    name: GitHub Release
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-
-      - name: Collect files
-        run: |
-          mkdir -p dist
-          find artifacts -type f \( -name 'agent-gateway-*' -o -name '*.sha256' \) -exec cp -t dist {} +
-          ls -la dist
-
-      - name: Create release
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
-          files: dist/*
+          fail_on_unmatched_files: true
+          body: |
+            下载 **agent-gateway** 二进制即可（linux-x64，需系统 Node ≥ 22.13）。
+
+            > GitHub 会固定显示 Source code 链接，无法关闭；本仓库已用 `.gitattributes` 清空自动源码包内容，请只用上方二进制资源。
+          files: |
+            release/agent-gateway
+            release/agent-gateway.sha256
