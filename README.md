@@ -25,6 +25,8 @@
 
 ## 一键启动
 
+本地打包：
+
 ```bash
 pnpm install && pnpm pack:bin
 # 使用 Cursor provider 时：
@@ -32,9 +34,11 @@ export CURSOR_API_KEY=cursor_...
 ./release/agent-gateway
 ```
 
+或从 [GitHub Releases](https://github.com/agent-components/agent-gateway/releases) 下载对应平台产物（如 `agent-gateway-linux-x64`），赋予执行权限后直接跑。打 `v*` tag 并 push 会自动构建并挂上二进制。
+
 打开终端打印的 UI。未设 `AGENT_GATEWAY_TOKEN` 时会自动生成。
 
-依赖：系统 **Node ≥ 22.13**。
+依赖：系统 **Node ≥ 22.13**（产物内嵌 `@cursor/sdk` 的平台原生依赖，请下载与机器匹配的 asset）。
 
 默认监听：`http://0.0.0.0:6090`  
 机器可读契约：`GET /openapi.json`
