@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
- * Single self-extracting executable embedding app + public/ + node_modules.
- * Host needs Node >= 22.13, bash, tar. First run unpacks to ~/.cache/agent-gateway/<ver>/.
+ * Self-extracting launcher embedding tsc dist + public/ + production node_modules.
+ * Nest stays unbundled (CJS packages + emitDecoratorMetadata). Host needs Node ≥ 22.13, bash, tar.
+ * First run unpacks to ~/.cache/agent-gateway/<ver>/.
  */
 import { spawnSync } from "node:child_process";
 import {
@@ -16,7 +17,6 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import * as esbuild from "esbuild";
 import { create as tarCreate } from "tar";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -24,10 +24,8 @@ const outDir = path.join(root, "release");
 const stageDir = path.join(outDir, ".stage");
 const binName = "agent-gateway";
 const binPath = path.join(outDir, binName);
-const webSrc = path.join(root, "dist/public");
 const pkg = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
 const version = pkg.version;
-const sdkVersion = pkg.dependencies["@cursor/sdk"];
 const MARKER = "__AGENT_GATEWAY_ARCHIVE__";
 
 function run(cmd, args, opts = {}) {
@@ -43,40 +41,23 @@ function run(cmd, args, opts = {}) {
 console.log("→ build");
 run("pnpm", ["build"]);
 
+const distMain = path.join(root, "dist/main.js");
+const webSrc = path.join(root, "dist/public");
+if (!existsSync(distMain)) {
+  console.error(`missing ${distMain}`);
+  process.exit(1);
+}
 if (!existsSync(webSrc)) {
   console.error(`missing web assets: ${webSrc}`);
   process.exit(1);
 }
 
-console.log("→ stage payload");
+console.log("→ stage payload (tsc dist, no esbuild bundle)");
 rmSync(outDir, { recursive: true, force: true });
 mkdirSync(stageDir, { recursive: true });
 
-await esbuild.build({
-  absWorkingDir: root,
-  entryPoints: [path.join(root, "src/main.ts")],
-  outfile: path.join(stageDir, "app.mjs"),
-  bundle: true,
-  platform: "node",
-  format: "esm",
-  target: "node22",
-  // @cursor/sdk: installed into the payload. Nest optional peers are
-  // lazy-required and unused by this app — leave unresolved at runtime.
-  external: [
-    "@cursor/sdk",
-    "@cursor/sdk/*",
-    "@nestjs/microservices",
-    "@nestjs/microservices/*",
-    "@nestjs/websockets",
-    "@nestjs/websockets/*",
-    "@fastify/static",
-    "class-validator",
-    "class-transformer",
-  ],
-  logLevel: "info",
-});
+cpSync(path.join(root, "dist"), path.join(stageDir, "dist"), { recursive: true });
 
-cpSync(webSrc, path.join(stageDir, "public"), { recursive: true });
 writeFileSync(
   path.join(stageDir, "package.json"),
   `${JSON.stringify(
@@ -85,14 +66,14 @@ writeFileSync(
       version,
       private: true,
       type: "module",
-      dependencies: { "@cursor/sdk": sdkVersion },
+      dependencies: pkg.dependencies,
     },
     null,
     2,
   )}\n`,
 );
 
-console.log("→ install @cursor/sdk");
+console.log("→ install production dependencies");
 run("npm", ["install", "--omit=dev", "--no-fund", "--no-audit"], {
   cwd: stageDir,
 });
@@ -106,7 +87,7 @@ await tarCreate(
     file: payloadPath,
     cwd: stageDir,
   },
-  ["app.mjs", "public", "package.json", "node_modules"],
+  ["dist", "package.json", "node_modules"],
 );
 
 const launcher = `#!/usr/bin/env bash
@@ -114,7 +95,7 @@ set -euo pipefail
 VERSION=${JSON.stringify(version)}
 MARKER=${JSON.stringify(MARKER)}
 CACHE="\${AGENT_GATEWAY_HOME:-\${XDG_CACHE_HOME:-$HOME/.cache}/agent-gateway/\$VERSION}"
-APP="\$CACHE/app.mjs"
+APP="\$CACHE/dist/main.js"
 
 if [[ ! -f "\$APP" ]]; then
   mkdir -p "\$CACHE"
@@ -129,7 +110,8 @@ if [[ ! -f "\$APP" ]]; then
   rm -f "\$TMP"
 fi
 
-export AGENT_GATEWAY_WEB_ROOT="\$CACHE/public"
+export AGENT_GATEWAY_WEB_ROOT="\$CACHE/dist/public"
+cd "\$CACHE"
 exec node "\$APP" "\$@"
 
 ${MARKER}

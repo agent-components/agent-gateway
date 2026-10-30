@@ -1,4 +1,14 @@
-import { Controller, Get, Inject, Param, Query } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Get,
+  HttpException,
+  HttpStatus,
+  Inject,
+  Param,
+  Patch,
+  Query,
+} from "@nestjs/common";
 import {
   AGENT_PROVIDER,
   SERVER_OPTIONS,
@@ -6,6 +16,7 @@ import {
   type ServerOptions,
 } from "../config/tokens.js";
 import { buildOpenApiDocument } from "../protocol/openapi.js";
+import type { RenameSessionRequest } from "../protocol/types.js";
 
 @Controller()
 export class UiController {
@@ -47,6 +58,21 @@ export class UiController {
   @Get("api/v1/sessions/:id")
   getSession(@Param("id") id: string, @Query("cwd") cwd?: string) {
     return this.provider.getSession(id, { cwd: cwd ?? this.options.cwd }, {});
+  }
+
+  @Patch("api/v1/sessions/:id")
+  async renameSession(@Param("id") id: string, @Body() body: RenameSessionRequest) {
+    if (!this.provider.renameSession) {
+      throw new HttpException("renameSession is not supported", HttpStatus.NOT_IMPLEMENTED);
+    }
+    if (!body?.name?.trim()) {
+      throw new HttpException("name is required", HttpStatus.BAD_REQUEST);
+    }
+    return this.provider.renameSession(
+      id,
+      { name: body.name, cwd: body.cwd ?? this.options.cwd },
+      {},
+    );
   }
 
   @Get("api/v1/models")

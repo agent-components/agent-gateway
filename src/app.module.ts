@@ -35,7 +35,8 @@ export class AppModule {
       imports: [
         ServeStaticModule.forRoot({
           rootPath: resolveWebRoot(),
-          exclude: ["/api/(.*)", "/openapi.json"],
+          // path-to-regexp v8 (Express 5) — no legacy /(.*) groups
+          exclude: ["/api/{*path}", "/openapi.json"],
         }),
       ],
       controllers: [ChatController, UiController],

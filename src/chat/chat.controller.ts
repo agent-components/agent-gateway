@@ -25,7 +25,8 @@ import type {
 @UseGuards(TokenGuard)
 export class ChatController {
   constructor(
-    private readonly bus: RunEventBus,
+    // Explicit token: esbuild/ESM bundles drop emitDecoratorMetadata for class types.
+    @Inject(RunEventBus) private readonly bus: RunEventBus,
     @Inject(AGENT_PROVIDER) private readonly provider: AgentHttpProvider,
   ) {}
 

@@ -1,20 +1,42 @@
 /* global window */
 (function (global) {
-  function assistantTextFromMessage(data) {
-    if (!data) return "";
-    if (typeof data.text === "string") return data.text;
-    const msg = data.message;
-    if (!msg) return "";
-    if (typeof msg === "string") return msg;
-    if (typeof msg.content === "string") return msg.content;
-    if (Array.isArray(msg.content)) {
-      return msg.content
+  function extractText(node) {
+    if (!node) return "";
+    if (typeof node === "string") return node;
+    if (typeof node.text === "string") return node.text;
+    if (typeof node.content === "string") return node.content;
+    if (Array.isArray(node.content)) {
+      return node.content
         .map(function (part) {
           if (typeof part === "string") return part;
           if (part && typeof part.text === "string") return part.text;
           return "";
         })
         .join("");
+    }
+    if (node.message) return extractText(node.message);
+    return "";
+  }
+
+  function assistantTextFromMessage(data) {
+    if (!data) return "";
+    if (typeof data.text === "string") return data.text;
+    const direct = extractText(data.message);
+    if (direct) return direct;
+    const turn = data.message && data.message.agentConversationTurn;
+    if (turn) {
+      if (turn.assistantMessage) {
+        const t = extractText(turn.assistantMessage);
+        if (t) return t;
+      }
+      const steps = turn.steps || [];
+      for (let i = steps.length - 1; i >= 0; i--) {
+        const step = steps[i];
+        if (step && step.assistantMessage) {
+          const t = extractText(step.assistantMessage);
+          if (t) return t;
+        }
+      }
     }
     return "";
   }

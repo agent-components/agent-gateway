@@ -1,4 +1,5 @@
 import { Agent, Cursor } from "@cursor/sdk";
+import { SqliteLocalAgentStore } from "@cursor/sdk/sqlite";
 import type {
   AgentHttpProvider,
   CancelChatRequest,
@@ -8,6 +9,7 @@ import type {
   ListSessionsQuery,
   ModelInfo,
   ProviderContext,
+  RenameSessionRequest,
   ResumeChatRequest,
   RunStream,
   Session,
@@ -190,16 +192,48 @@ export function createCursorProvider(): AgentHttpProvider {
         limit: query.limit,
       });
 
+      const storeById = new Map<
+        string,
+        { status?: string; name?: string | null; activeRunId?: string | null; updatedAt?: number }
+      >();
+      try {
+        const store = await SqliteLocalAgentStore.open({ workspaceRef: cwd });
+        try {
+          const listed = await store.agents.list({
+            filter: { cwd, limit: query.limit ?? 50 },
+          });
+          for (const doc of listed.items) {
+            storeById.set(doc.agentId, {
+              status: doc.status,
+              name: doc.name,
+              activeRunId: doc.activeRunId ?? null,
+              updatedAt: doc.updatedAt,
+            });
+          }
+        } finally {
+          await store.dispose();
+        }
+      } catch {
+        /* list still works from Agent.list */
+      }
+
       return {
-        items: result.items.map((item) => ({
-          id: item.agentId,
-          name: item.name ?? undefined,
-          status: String(item.status ?? "unknown"),
-          cwd: (item as { cwd?: string }).cwd ?? cwd,
-          createdAt: item.createdAt,
-          updatedAt: item.lastModified,
-          activeRunId: (item as { activeRunId?: string | null }).activeRunId ?? null,
-        })),
+        items: result.items.map((item) => {
+          const local = storeById.get(item.agentId);
+          return {
+            id: item.agentId,
+            name: local?.name ?? item.name ?? undefined,
+            // Prefer local store status (idle/running) when available.
+            status: String(local?.status ?? item.status ?? "unknown"),
+            cwd: (item as { cwd?: string }).cwd ?? cwd,
+            createdAt: item.createdAt,
+            updatedAt: local?.updatedAt ?? item.lastModified,
+            activeRunId:
+              local?.activeRunId ??
+              (item as { activeRunId?: string | null }).activeRunId ??
+              null,
+          };
+        }),
         nextCursor: result.nextCursor,
       };
     },
@@ -246,19 +280,81 @@ export function createCursorProvider(): AgentHttpProvider {
         runs = [];
       }
 
+      let activeRunId = (info as { activeRunId?: string | null }).activeRunId ?? null;
+      let status = String(info.status ?? "unknown");
+      let name = info.name ?? undefined;
+      let updatedAt = info.lastModified;
+      try {
+        const store = await SqliteLocalAgentStore.open({ workspaceRef: cwd });
+        try {
+          const doc = await store.agents.get({ agentId: id });
+          if (doc) {
+            activeRunId = doc.activeRunId ?? activeRunId;
+            status = String(doc.status ?? status);
+            name = doc.name ?? name;
+            updatedAt = doc.updatedAt ?? updatedAt;
+          }
+        } finally {
+          await store.dispose();
+        }
+      } catch {
+        /* keep Agent.get fields */
+      }
+
       return {
         session: {
           id: info.agentId,
-          name: info.name ?? undefined,
-          status: String(info.status ?? "unknown"),
+          name,
+          status,
           cwd: (info as { cwd?: string }).cwd ?? cwd,
           createdAt: info.createdAt,
-          updatedAt: info.lastModified,
-          activeRunId: (info as { activeRunId?: string | null }).activeRunId ?? null,
+          updatedAt,
+          activeRunId,
         },
         messages,
         runs,
       };
+    },
+
+    async renameSession(
+      id: string,
+      req: RenameSessionRequest,
+      _ctx: ProviderContext,
+    ): Promise<Session> {
+      const name = req.name?.trim();
+      if (!name) {
+        const err = new Error("name is required");
+        (err as Error & { status: number }).status = 400;
+        throw err;
+      }
+      const cwd = req.cwd ?? process.cwd();
+      const store = await SqliteLocalAgentStore.open({ workspaceRef: cwd });
+      try {
+        const doc = await store.agents.get({ agentId: id });
+        if (!doc) {
+          const err = new Error(`Session not found: ${id}`);
+          (err as Error & { status: number }).status = 404;
+          throw err;
+        }
+        const updated = await store.agents.update({
+          agent: {
+            ...doc,
+            name,
+            updatedAt: Date.now(),
+          },
+        });
+        return {
+          id: updated.agentId,
+          name: updated.name ?? name,
+          status: String(updated.status ?? "unknown"),
+          cwd: updated.cwd ?? cwd,
+          createdAt: updated.createdAt,
+          updatedAt: updated.updatedAt,
+          activeRunId: updated.activeRunId ?? null,
+        };
+      } finally {
+        await store.dispose();
+      }
     },
 
     async listModels(_ctx: ProviderContext): Promise<ModelInfo[]> {

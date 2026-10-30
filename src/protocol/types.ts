@@ -134,6 +134,11 @@ export interface GetSessionQuery {
   cwd?: string;
 }
 
+export interface RenameSessionRequest {
+  name: string;
+  cwd?: string;
+}
+
 export interface AgentHttpProvider {
   readonly id: string;
   create(req: CreateChatRequest, ctx: ProviderContext): Promise<RunStream>;
@@ -142,6 +147,11 @@ export interface AgentHttpProvider {
   cancel(req: CancelChatRequest, ctx: ProviderContext): Promise<void>;
   listSessions(query: ListSessionsQuery, ctx: ProviderContext): Promise<ListResult<Session>>;
   getSession(id: string, query: GetSessionQuery, ctx: ProviderContext): Promise<SessionDetail>;
+  renameSession?(
+    id: string,
+    req: RenameSessionRequest,
+    ctx: ProviderContext,
+  ): Promise<Session>;
   listModels?(ctx: ProviderContext): Promise<ModelInfo[]>;
 }
 
