@@ -24,9 +24,9 @@ async function bootstrap(): Promise<void> {
     AppModule.register({ cwd, token }),
     { logger: ["error", "warn", "log"], bodyParser: false },
   );
-  // Base64 attachments: 16MB of files expands to roughly 22MB of JSON.
-  app.useBodyParser("json", { limit: "32mb" });
-  app.useBodyParser("urlencoded", { limit: "32mb" });
+  // Base64 attachments: 20MB of files expands to roughly 27MB of JSON.
+  app.useBodyParser("json", { limit: "40mb" });
+  app.useBodyParser("urlencoded", { limit: "40mb" });
 
   app.enableCors({
     origin: "*",

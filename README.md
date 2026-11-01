@@ -92,7 +92,7 @@ Provider 级（按需选填，由对应 Provider 自行读取，多选一即可�
 | `mode` | string | | 如 `agent` / `plan`（视 Provider） |
 | `mcpServers` | object | | MCP 服务配置 map |
 | `providerOptions` | object | | Provider 扩展参数 |
-| `attachments` | array | | 上传文件，见下。最多 8 个，单文件 ≤ 8MB，合计 ≤ 16MB |
+| `attachments` | array | | 上传文件，见下。最多 8 个，单文件 ≤ 20MB，合计 ≤ 20MB |
 
 **POST `/api/v1/chat/resume`**
 
@@ -130,7 +130,7 @@ Provider 级（按需选填，由对应 Provider 自行读取，多选一即可�
 | `mimeType` | string | | 如 `image/png`、`text/plain` |
 | `data` | string | ✓ | base64，或 `data:` URL |
 
-图片和 docx 等附件都写入 `AGENT_GATEWAY_UPLOAD_DIR`（未设置时为 `{cwd}/.agent-gateway/uploads`），磁盘上的文件名是随机的，提示词里仍带原始文件名和路径。png / jpeg / gif / webp 会先压缩（最长边 1600，无透明通道时转为 jpeg），再把压缩后的内容交给模型。steer 只有文本通道，图片只落盘。调试页输入框支持选择、拖拽和粘贴文件。
+图片和 docx 等附件都写入 `AGENT_GATEWAY_UPLOAD_DIR`（未设置时为 `{cwd}/.agent-gateway/uploads`），磁盘上的文件名是随机的，提示词里仍带原始文件名和路径。网关按收到的字节保存，不在服务端压缩。调试页会在上传前压缩图片（最长边 1600，无透明通道时转为 jpeg）。steer 只有文本通道，图片只落盘。调试页输入框支持选择、拖拽和粘贴文件。
 
 **POST `/api/v1/chat/cancel`**
 

@@ -36,7 +36,7 @@ export function buildOpenApiDocument(options?: {
             mimeType: { type: "string" },
             data: {
               type: "string",
-              description: "Base64 file bytes, or a data URL. All files are stored under AGENT_GATEWAY_UPLOAD_DIR (or {cwd}/.agent-gateway/uploads) with a random filename. Images are compressed before being sent to the model.",
+              description: "Base64 file bytes, or a data URL. All files are stored under AGENT_GATEWAY_UPLOAD_DIR (or {cwd}/.agent-gateway/uploads) with a random filename. Images are passed through as received.",
             },
           },
         },

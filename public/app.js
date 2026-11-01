@@ -4,8 +4,10 @@
   const { useEffect, useRef, useState } = React;
   const { Button, Input, Select, message } = antd;
   const MAX_ATTACHMENTS = 8;
-  const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
-  const MAX_ATTACHMENT_TOTAL = 16 * 1024 * 1024;
+  const MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024;
+  const MAX_ATTACHMENT_TOTAL = 20 * 1024 * 1024;
+  const MAX_IMAGE_EDGE = 1600;
+  const JPEG_QUALITY = 0.75;
 
   if (typeof marked !== "undefined" && marked.setOptions) {
     marked.setOptions({
@@ -344,6 +346,86 @@
         reject(reader.error || new Error("读取文件失败"));
       };
       reader.readAsDataURL(file);
+    });
+  }
+
+  function isCompressibleImage(file) {
+    const type = String((file && file.type) || "").toLowerCase();
+    if (
+      type === "image/png" ||
+      type === "image/jpeg" ||
+      type === "image/jpg" ||
+      type === "image/gif" ||
+      type === "image/webp"
+    ) {
+      return true;
+    }
+    return /\.(png|jpe?g|gif|webp)$/i.test((file && file.name) || "");
+  }
+
+  function replaceExt(name, ext) {
+    return String(name || "image").replace(/\.[^.]+$/, "") + ext;
+  }
+
+  /** Longest edge 1600. Opaque images become JPEG; images with alpha stay PNG. */
+  function compressImageFile(file) {
+    return new Promise(function (resolve, reject) {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = function () {
+        URL.revokeObjectURL(url);
+        const srcW = img.naturalWidth || img.width;
+        const srcH = img.naturalHeight || img.height;
+        if (!srcW || !srcH) {
+          reject(new Error("图片无法读取"));
+          return;
+        }
+        const scale = Math.min(1, MAX_IMAGE_EDGE / Math.max(srcW, srcH));
+        const w = Math.max(1, Math.round(srcW * scale));
+        const h = Math.max(1, Math.round(srcH * scale));
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d", { willReadFrequently: true });
+        if (!ctx) {
+          reject(new Error("图片无法压缩"));
+          return;
+        }
+        ctx.drawImage(img, 0, 0, w, h);
+        let alpha = false;
+        const pixels = ctx.getImageData(0, 0, w, h).data;
+        for (let i = 3; i < pixels.length; i += 4) {
+          if (pixels[i] !== 255) {
+            alpha = true;
+            break;
+          }
+        }
+        const mime = alpha ? "image/png" : "image/jpeg";
+        canvas.toBlob(
+          function (blob) {
+            if (!blob) {
+              reject(new Error("图片无法压缩"));
+              return;
+            }
+            if (scale === 1 && blob.size >= file.size) {
+              resolve(null);
+              return;
+            }
+            resolve({
+              blob: blob,
+              name: replaceExt(file.name, alpha ? ".png" : ".jpg"),
+              mimeType: mime,
+            });
+          },
+          mime,
+          alpha ? undefined : JPEG_QUALITY,
+        );
+      };
+      img.onerror = function () {
+        URL.revokeObjectURL(url);
+        reject(new Error("图片无法读取"));
+      };
+      img.src = url;
     });
   }
 
@@ -759,22 +841,32 @@
       const loaded = [];
       for (let i = 0; i < incoming.length; i++) {
         const file = incoming[i];
-        const name = file.name || "file";
+        let name = file.name || "file";
+        let mimeType = file.type || "application/octet-stream";
+        let payload = file;
         if (!file.size) {
           message.warning(name + " 是空文件");
           continue;
         }
-        if (file.size > MAX_ATTACHMENT_BYTES) {
-          message.error(name + " 超过 8MB");
-          continue;
-        }
         try {
-          const data = await readAsBase64(file);
+          if (isCompressibleImage(file)) {
+            const compressed = await compressImageFile(file);
+            if (compressed) {
+              payload = compressed.blob;
+              name = compressed.name;
+              mimeType = compressed.mimeType;
+            }
+          }
+          if (payload.size > MAX_ATTACHMENT_BYTES) {
+            message.error(name + " 超过 20MB");
+            continue;
+          }
+          const data = await readAsBase64(payload);
           loaded.push({
             id: Date.now().toString(36) + "-" + i + "-" + Math.random().toString(36).slice(2, 6),
             name: name,
-            mimeType: file.type || "application/octet-stream",
-            size: file.size,
+            mimeType: mimeType,
+            size: payload.size,
             data: data,
           });
         } catch (_) {
@@ -800,7 +892,7 @@
         total += file.size || 0;
       });
       if (total > MAX_ATTACHMENT_TOTAL) {
-        message.error("附件总大小超过 16MB");
+        message.error("附件总大小超过 20MB");
         return;
       }
       const next = prev.concat(accepted);
@@ -1421,7 +1513,7 @@
                     { className: "composer-hint" },
                     streaming
                       ? "Enter 发送为 steer · 可附文件"
-                      : "Enter 发送 · 图片会压缩后交给模型，附件以随机名保存",
+                      : "Enter 发送 · 图片会先压缩，单文件不超过 20MB",
                   ),
                 ),
                 e(

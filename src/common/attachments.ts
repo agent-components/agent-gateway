@@ -2,14 +2,11 @@ import { randomBytes } from "node:crypto";
 import { mkdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { SDKImage } from "@cursor/sdk";
-import sharp from "sharp";
 import type { ChatAttachment } from "../protocol/types.js";
 
 const MAX_FILES = 8;
-const MAX_FILE_BYTES = 8 * 1024 * 1024;
-const MAX_TOTAL_BYTES = 16 * 1024 * 1024;
-const MAX_IMAGE_EDGE = 1600;
-const JPEG_QUALITY = 75;
+const MAX_FILE_BYTES = 20 * 1024 * 1024;
+const MAX_TOTAL_BYTES = 20 * 1024 * 1024;
 
 export interface PreparedAttachments {
   text: string;
@@ -101,41 +98,6 @@ function randomStoredName(ext: string): string {
   return randomBytes(16).toString("hex") + ext;
 }
 
-/** Shrink images before they are stored or sent to the SDK. */
-async function compressImage(
-  bytes: Buffer,
-  mimeType: string,
-): Promise<{ bytes: Buffer; mimeType: string; compressed: boolean }> {
-  try {
-    const options = { animated: false, failOn: "error" as const, limitInputPixels: 40_000_000 };
-    const meta = await sharp(bytes, options).metadata();
-    const width = meta.width ?? 0;
-    const height = meta.height ?? 0;
-    let pipeline = sharp(bytes, options).rotate();
-    const resized = width > MAX_IMAGE_EDGE || height > MAX_IMAGE_EDGE;
-    if (resized) {
-      pipeline = pipeline.resize({
-        width: MAX_IMAGE_EDGE,
-        height: MAX_IMAGE_EDGE,
-        fit: "inside",
-        withoutEnlargement: true,
-      });
-    }
-    const keepPng = mimeType === "image/png" && meta.hasAlpha === true;
-    const out = keepPng
-      ? await pipeline.png({ compressionLevel: 9, palette: true, effort: 8 }).toBuffer()
-      : await pipeline.jpeg({ quality: JPEG_QUALITY, mozjpeg: true }).toBuffer();
-    const nextMime = keepPng ? "image/png" : "image/jpeg";
-    if (!resized && out.length >= bytes.length) {
-      return { bytes, mimeType, compressed: false };
-    }
-    return { bytes: out, mimeType: nextMime, compressed: true };
-  } catch (err) {
-    if (typeof err === "object" && err !== null && "status" in err) throw err;
-    fail("图片无法压缩");
-  }
-}
-
 /** Directory for saved attachments. Relative values resolve from the process cwd. */
 export function resolveUploadDir(cwd: string): string {
   const configured = process.env.AGENT_GATEWAY_UPLOAD_DIR?.trim();
@@ -156,8 +118,8 @@ function pathForPrompt(cwd: string, abs: string): string {
 /**
  * Every attachment is stored under `AGENT_GATEWAY_UPLOAD_DIR` (or
  * `{cwd}/.agent-gateway/uploads`) with a random filename.
- * Images are compressed first. On create/resume the compressed bytes are also
- * passed to the SDK. Steer is text-only, so those images are only on disk.
+ * Image bytes are stored as received. On create/resume, images are also passed
+ * to the SDK. Steer is text-only, so those images are only on disk.
  */
 export async function prepareAttachments(
   cwd: string,
@@ -203,31 +165,19 @@ export async function prepareAttachments(
     }
     const label = safeFileName(file.name);
     const bytes = decodeBase64(file.data, label);
-    if (bytes.length > MAX_FILE_BYTES) fail(`文件「${label}」超过 8MB`);
+    if (bytes.length > MAX_FILE_BYTES) fail(`文件「${label}」超过 20MB`);
     total += bytes.length;
-    if (total > MAX_TOTAL_BYTES) fail("附件总大小超过 16MB");
+    if (total > MAX_TOTAL_BYTES) fail("附件总大小超过 20MB");
 
     const sniffed = sniffImageMime(bytes);
-    let payload = bytes;
-    let mimeType = sniffed ?? normalizeMime(file.mimeType) ?? "application/octet-stream";
-    let compressed = false;
-    if (sniffed) {
-      const image = await compressImage(bytes, sniffed);
-      payload = image.bytes;
-      mimeType = image.mimeType;
-      compressed = image.compressed;
-      if (inlineImages) images.push({ data: payload.toString("base64"), mimeType });
-    }
+    const mimeType = sniffed ?? normalizeMime(file.mimeType) ?? "application/octet-stream";
+    if (sniffed && inlineImages) images.push({ data: bytes.toString("base64"), mimeType });
 
-    const rel = await saveFile(payload, storedExtension(file.name, mimeType));
+    const rel = await saveFile(bytes, storedExtension(file.name, mimeType));
     const suffix = sniffed
-      ? compressed
-        ? inlineImages
-          ? "（已压缩，并附在本条消息）"
-          : "（已压缩）"
-        : inlineImages
-          ? "（已附在本条消息）"
-          : ""
+      ? inlineImages
+        ? "（已附在本条消息）"
+        : ""
       : ` (${mimeType})`;
     lines.push(`- ${label} → ${rel}${suffix}`);
   }
