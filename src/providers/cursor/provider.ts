@@ -1,5 +1,6 @@
-import { Agent, Cursor } from "@cursor/sdk";
+import { Agent, AgentNotFoundError, Cursor, type SDKUserMessage } from "@cursor/sdk";
 import { SqliteLocalAgentStore } from "@cursor/sdk/sqlite";
+import { prepareAttachments } from "../../common/attachments.js";
 import type {
   AgentHttpProvider,
   CancelChatRequest,
@@ -24,7 +25,7 @@ import { sdkStreamToBusEvents } from "./map-events.js";
 type DisposableAgent = {
   agentId: string;
   send: (
-    prompt: string,
+    prompt: string | SDKUserMessage,
     opts?: Record<string, unknown>,
   ) => Promise<{
     id: string;
@@ -91,6 +92,23 @@ function asMcpServers(
   return servers;
 }
 
+function isMissingAgentCache(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  if (err instanceof AgentNotFoundError) return true;
+  const value = err as { name?: string; code?: string; message?: string; cause?: unknown };
+  if (value.name === "AgentNotFoundError" || value.code === "agent_not_found") return true;
+  if (typeof value.message === "string" && /agent\b.+\bnot found/i.test(value.message)) return true;
+  return isMissingAgentCache(value.cause);
+}
+
+function missingAgentCacheError(sessionId: string, cwd: string): Error {
+  const err = new Error(
+    `找不到会话 ${sessionId} 的本地 agent 缓存。请确认工作区与创建该会话时一致（当前 cwd: ${cwd}）；如果缓存已清理，请新开一个会话。`,
+  );
+  (err as Error & { status: number }).status = 404;
+  return err;
+}
+
 function notActive(): never {
   const err = new Error("No active run for session");
   (err as Error & { status: number }).status = 404;
@@ -100,10 +118,10 @@ function notActive(): never {
 export function createCursorProvider(): AgentHttpProvider {
   async function buildRunStream(
     agent: DisposableAgent,
-    prompt: string,
+    message: string | SDKUserMessage,
     sendOpts: Record<string, unknown> | undefined,
   ): Promise<RunStream> {
-    const run = await agent.send(prompt, sendOpts);
+    const run = await agent.send(message, sendOpts);
     const sessionId = agent.agentId;
     const runId = run.id;
 
@@ -138,6 +156,10 @@ export function createCursorProvider(): AgentHttpProvider {
 
     async create(req: CreateChatRequest, _ctx: ProviderContext): Promise<RunStream> {
       const apiKey = requireApiKey();
+      const prepared = await prepareAttachments(req.cwd, req.prompt ?? "", req.attachments);
+      const message: string | SDKUserMessage = prepared.images.length
+        ? { text: prepared.text, images: prepared.images }
+        : prepared.text;
       const agent = (await Agent.create({
         apiKey,
         model: { id: req.model },
@@ -150,7 +172,7 @@ export function createCursorProvider(): AgentHttpProvider {
         ...(req.mode ? { mode: req.mode as "agent" | "plan" } : {}),
       })) as unknown as DisposableAgent;
 
-      return buildRunStream(agent, req.prompt, {
+      return buildRunStream(agent, message, {
         ...(req.providerOptions?.send as object | undefined),
       });
     },
@@ -158,17 +180,32 @@ export function createCursorProvider(): AgentHttpProvider {
     async resume(req: ResumeChatRequest, _ctx: ProviderContext): Promise<RunStream> {
       const apiKey = requireApiKey();
       const cwd = req.cwd ?? process.cwd();
-      const agent = (await Agent.resume(req.sessionId, {
-        apiKey,
-        ...(req.model ? { model: { id: req.model } } : {}),
-        mcpServers: asMcpServers(req.mcpServers) as never,
-        local: { cwd },
-      })) as unknown as DisposableAgent;
+      let agent: DisposableAgent;
+      try {
+        agent = (await Agent.resume(req.sessionId, {
+          apiKey,
+          ...(req.model ? { model: { id: req.model } } : {}),
+          mcpServers: asMcpServers(req.mcpServers) as never,
+          local: { cwd },
+        })) as unknown as DisposableAgent;
+      } catch (err) {
+        if (isMissingAgentCache(err)) throw missingAgentCacheError(req.sessionId, cwd);
+        throw err;
+      }
 
-      return buildRunStream(agent, req.prompt, {
-        ...(req.model ? { model: { id: req.model } } : {}),
-        ...(req.providerOptions?.send as object | undefined),
-      });
+      try {
+        const prepared = await prepareAttachments(cwd, req.prompt ?? "", req.attachments);
+        const message: string | SDKUserMessage = prepared.images.length
+          ? { text: prepared.text, images: prepared.images }
+          : prepared.text;
+        return await buildRunStream(agent, message, {
+          ...(req.model ? { model: { id: req.model } } : {}),
+          ...(req.providerOptions?.send as object | undefined),
+        });
+      } catch (err) {
+        await agent[Symbol.asyncDispose]?.();
+        throw err;
+      }
     },
 
     async steer(_req: SteerChatRequest, _ctx: ProviderContext): Promise<SteerResult> {

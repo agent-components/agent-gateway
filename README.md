@@ -51,6 +51,7 @@ export CURSOR_API_KEY=cursor_...
 |------|------|
 | `AGENT_GATEWAY_TOKEN` | 可选；缺省自动生成 |
 | `AGENT_GATEWAY_CWD` | 默认工作区 |
+| `AGENT_GATEWAY_UPLOAD_DIR` | 附件保存目录。未设置时用 `{cwd}/.agent-gateway/uploads` |
 | `PORT` / `HOST` | 默认 `6090` / `0.0.0.0` |
 
 Provider 级（按需选填，由对应 Provider 自行读取，多选一即可）：
@@ -84,24 +85,26 @@ Provider 级（按需选填，由对应 Provider 自行读取，多选一即可�
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `prompt` | string | ✓ | 用户提示 |
+| `prompt` | string | | 用户提示。与 `attachments` 至少填一个 |
 | `model` | string | ✓ | 模型 id |
 | `cwd` | string | ✓ | 工作区绝对路径 |
 | `name` | string | | 会话名 |
 | `mode` | string | | 如 `agent` / `plan`（视 Provider） |
 | `mcpServers` | object | | MCP 服务配置 map |
 | `providerOptions` | object | | Provider 扩展参数 |
+| `attachments` | array | | 上传文件，见下。最多 8 个，单文件 ≤ 8MB，合计 ≤ 16MB |
 
 **POST `/api/v1/chat/resume`**
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | `sessionId` | string | ✓ | 会话 id |
-| `prompt` | string | ✓ | 用户提示 |
+| `prompt` | string | | 用户提示。与 `attachments` 至少填一个 |
 | `model` | string | | 模型 id |
-| `cwd` | string | | 工作区 |
+| `cwd` | string | | 工作区。带附件时文件会写到这里 |
 | `mcpServers` | object | | MCP |
 | `providerOptions` | object | | 扩展参数 |
+| `attachments` | array | | 同 create |
 
 **POST `/api/v1/chat/connect`**
 
@@ -115,7 +118,19 @@ Provider 级（按需选填，由对应 Provider 自行读取，多选一即可�
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
 | `sessionId` | string | ✓ | 会话 id |
-| `text` | string | ✓ | 注入文本 |
+| `text` | string | | 注入文本。与 `attachments` 至少填一个 |
+| `cwd` | string | | 未设置 `AGENT_GATEWAY_UPLOAD_DIR` 时，带附件必填 |
+| `attachments` | array | | 同 create。steer 只有文本通道，图片也会落盘并由提示词给出路径 |
+
+**附件 `attachments[]`**
+
+| 字段 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| `name` | string | ✓ | 原始文件名 |
+| `mimeType` | string | | 如 `image/png`、`text/plain` |
+| `data` | string | ✓ | base64，或 `data:` URL |
+
+图片和 docx 等附件都写入 `AGENT_GATEWAY_UPLOAD_DIR`（未设置时为 `{cwd}/.agent-gateway/uploads`），磁盘上的文件名是随机的，提示词里仍带原始文件名和路径。png / jpeg / gif / webp 会先压缩（最长边 1600，无透明通道时转为 jpeg），再把压缩后的内容交给模型。steer 只有文本通道，图片只落盘。调试页输入框支持选择、拖拽和粘贴文件。
 
 **POST `/api/v1/chat/cancel`**
 

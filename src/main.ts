@@ -2,6 +2,7 @@
 import { randomBytes } from "node:crypto";
 import "reflect-metadata";
 import { NestFactory } from "@nestjs/core";
+import type { NestExpressApplication } from "@nestjs/platform-express";
 import { AppModule } from "./app.module.js";
 
 function ensureToken(): string {
@@ -19,10 +20,13 @@ async function bootstrap(): Promise<void> {
   const cwd = process.env.AGENT_GATEWAY_CWD || process.cwd();
   const token = ensureToken();
 
-  const app = await NestFactory.create(
+  const app = await NestFactory.create<NestExpressApplication>(
     AppModule.register({ cwd, token }),
-    { logger: ["error", "warn", "log"] },
+    { logger: ["error", "warn", "log"], bodyParser: false },
   );
+  // Base64 attachments: 16MB of files expands to roughly 22MB of JSON.
+  app.useBodyParser("json", { limit: "32mb" });
+  app.useBodyParser("urlencoded", { limit: "32mb" });
 
   app.enableCors({
     origin: "*",
@@ -38,6 +42,9 @@ async function bootstrap(): Promise<void> {
   console.log(`  UI      ${url}`);
   console.log(`  OpenAPI ${url}/openapi.json`);
   console.log(`  cwd    ${cwd}`);
+  if (process.env.AGENT_GATEWAY_UPLOAD_DIR?.trim()) {
+    console.log(`  uploads ${process.env.AGENT_GATEWAY_UPLOAD_DIR.trim()}`);
+  }
   console.log(`  token  ${token}`);
   console.log("");
 }

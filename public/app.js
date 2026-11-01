@@ -3,6 +3,9 @@
   const e = React.createElement;
   const { useEffect, useRef, useState } = React;
   const { Button, Input, Select, message } = antd;
+  const MAX_ATTACHMENTS = 8;
+  const MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;
+  const MAX_ATTACHMENT_TOTAL = 16 * 1024 * 1024;
 
   if (typeof marked !== "undefined" && marked.setOptions) {
     marked.setOptions({
@@ -322,6 +325,49 @@
     );
   }
 
+  function formatBytes(size) {
+    const n = Number(size) || 0;
+    if (n < 1024) return n + " B";
+    if (n < 1048576) return Math.round(n / 1024) + " KB";
+    return (n / 1048576).toFixed(1) + " MB";
+  }
+
+  function readAsBase64(file) {
+    return new Promise(function (resolve, reject) {
+      const reader = new FileReader();
+      reader.onload = function () {
+        const result = String(reader.result || "");
+        const comma = result.indexOf(",");
+        resolve(comma >= 0 ? result.slice(comma + 1) : result);
+      };
+      reader.onerror = function () {
+        reject(reader.error || new Error("读取文件失败"));
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function toApiAttachments(files) {
+    return (files || []).map(function (file) {
+      return {
+        name: file.name,
+        mimeType: file.mimeType,
+        data: file.data,
+      };
+    });
+  }
+
+  function displayPrompt(text, files) {
+    const names = (files || [])
+      .map(function (file) {
+        return file.name;
+      })
+      .filter(Boolean);
+    if (text && names.length) return text + "\n\n附件：" + names.join("、");
+    if (names.length) return "附件：" + names.join("、");
+    return text;
+  }
+
   function formatTime(value) {
     if (value == null) return "";
     const d = new Date(value);
@@ -343,6 +389,8 @@
     const [sessions, setSessions] = useState([]);
     const [sessionsLoading, setSessionsLoading] = useState(false);
     const [prompt, setPrompt] = useState("");
+    const [attachments, setAttachments] = useState([]);
+    const [dragOver, setDragOver] = useState(false);
     const [messages, setMessages] = useState([]);
     const [streaming, setStreaming] = useState(false);
     const [liveText, setLiveText] = useState("");
@@ -361,6 +409,8 @@
     const [mcpError, setMcpError] = useState("");
     const abortRef = useRef(null);
     const bottomRef = useRef(null);
+    const fileInputRef = useRef(null);
+    const attachmentsRef = useRef([]);
     const cwdRef = useRef("");
     const streamingRef = useRef(false);
     const sessionIdRef = useRef(null);
@@ -368,6 +418,10 @@
     useEffect(function () {
       cwdRef.current = cwd;
     }, [cwd]);
+
+    useEffect(function () {
+      attachmentsRef.current = attachments;
+    }, [attachments]);
 
     useEffect(function () {
       streamingRef.current = streaming;
@@ -542,11 +596,9 @@
           });
         });
 
-        // Active run → reconnect SSE (replay buffer + live).
-        // Also try once when status lags behind the in-process bus.
+        // Only attach when this process still has the run. Idle sessions have
+        // nothing to replay, and connect would 404.
         if (isSessionBusy(sess)) {
-          void attachConnect(id, { quiet: false });
-        } else {
           void attachConnect(id, { quiet: true });
         }
       } catch (err) {
@@ -701,20 +753,111 @@
       }
     }
 
+    async function addFiles(fileList) {
+      const incoming = Array.from(fileList || []);
+      if (!incoming.length) return;
+      const loaded = [];
+      for (let i = 0; i < incoming.length; i++) {
+        const file = incoming[i];
+        const name = file.name || "file";
+        if (!file.size) {
+          message.warning(name + " 是空文件");
+          continue;
+        }
+        if (file.size > MAX_ATTACHMENT_BYTES) {
+          message.error(name + " 超过 8MB");
+          continue;
+        }
+        try {
+          const data = await readAsBase64(file);
+          loaded.push({
+            id: Date.now().toString(36) + "-" + i + "-" + Math.random().toString(36).slice(2, 6),
+            name: name,
+            mimeType: file.type || "application/octet-stream",
+            size: file.size,
+            data: data,
+          });
+        } catch (_) {
+          message.error(name + " 读取失败");
+        }
+      }
+      if (!loaded.length) return;
+      const prev = attachmentsRef.current;
+      const room = MAX_ATTACHMENTS - prev.length;
+      if (room <= 0) {
+        message.warning("一次最多 " + MAX_ATTACHMENTS + " 个文件");
+        return;
+      }
+      const accepted = loaded.slice(0, room);
+      if (loaded.length > room) {
+        message.warning("一次最多 " + MAX_ATTACHMENTS + " 个文件");
+      }
+      let total = 0;
+      prev.forEach(function (file) {
+        total += file.size || 0;
+      });
+      accepted.forEach(function (file) {
+        total += file.size || 0;
+      });
+      if (total > MAX_ATTACHMENT_TOTAL) {
+        message.error("附件总大小超过 16MB");
+        return;
+      }
+      const next = prev.concat(accepted);
+      attachmentsRef.current = next;
+      setAttachments(next);
+    }
+
+    function removeAttachment(id) {
+      setAttachments(function (prev) {
+        const next = prev.filter(function (file) {
+          return file.id !== id;
+        });
+        attachmentsRef.current = next;
+        return next;
+      });
+    }
+
     async function onSend() {
       const text = prompt.trim();
-      if (!text) return;
+      const files = attachments.slice();
+      if (!text && !files.length) return;
       if (!cwd.trim()) {
         message.warning("请填写工作区路径");
         return;
       }
 
       const activeId = sessionIdRef.current || sessionId;
+      if (!(activeId && shouldSteer())) {
+        try {
+          parseMcpServers();
+        } catch (err) {
+          message.error(err.message || String(err));
+          setMcpOpen(true);
+          return;
+        }
+      }
 
+      const localId = "local-" + Date.now();
       setPrompt("");
+      setAttachments([]);
+      attachmentsRef.current = [];
       setMessages(function (prev) {
-        return prev.concat([{ id: "local-" + Date.now(), role: "user", content: text }]);
+        return prev.concat([
+          { id: localId, role: "user", content: displayPrompt(text, files) },
+        ]);
       });
+
+      function restoreComposer() {
+        setPrompt(text);
+        setAttachments(files);
+        attachmentsRef.current = files;
+        setMessages(function (prev) {
+          return prev.filter(function (item) {
+            return item.id !== localId;
+          });
+        });
+      }
 
       // Frontend-only: same session + busy/streaming → steer; keep SSE alive.
       if (activeId && shouldSteer()) {
@@ -722,11 +865,14 @@
           const result = await AgentHttpApi.chatSteer({
             sessionId: activeId,
             text: text,
+            cwd: cwd,
+            attachments: toApiAttachments(files),
           });
           if (result && result.outcome === "revert_to_followup") {
             message.info("当前无法 steer，改为续聊");
             if (!streamingRef.current) {
-              await runPromptRequest(text);
+              const resumed = await runPromptRequest(result.text || text, result.text ? [] : files);
+              if (!resumed) restoreComposer();
             }
           } else if (!streamingRef.current) {
             // Session marked busy but we are not attached — reconnect.
@@ -735,23 +881,26 @@
           await refreshSessions(cwd);
         } catch (err) {
           message.error(err.message || String(err));
+          restoreComposer();
         }
         return;
       }
 
-      await runPromptRequest(text);
+      const ok = await runPromptRequest(text, files);
+      if (!ok) restoreComposer();
     }
 
-    async function runPromptRequest(text) {
+    async function runPromptRequest(text, files) {
       let mcpServers;
       try {
         mcpServers = parseMcpServers();
       } catch (err) {
         message.error(err.message || String(err));
         setMcpOpen(true);
-        return;
+        return false;
       }
 
+      const attached = toApiAttachments(files);
       const activeId = sessionIdRef.current || sessionId;
       const ac = new AbortController();
       abortRef.current = ac;
@@ -759,32 +908,26 @@
       setStreaming(true);
       try {
         // Same session → resume; only create when there is no sessionId.
+        const payload = {
+          prompt: text,
+          model: model,
+          cwd: cwd,
+          mcpServers: mcpServers,
+          attachments: attached.length ? attached : undefined,
+        };
         const res = activeId
           ? await AgentHttpApi.chatResume(
-              {
-                sessionId: activeId,
-                prompt: text,
-                model: model,
-                cwd: cwd,
-                mcpServers: mcpServers,
-              },
+              Object.assign({ sessionId: activeId }, payload),
               ac.signal,
             )
-          : await AgentHttpApi.chatCreate(
-              {
-                prompt: text,
-                model: model,
-                cwd: cwd,
-                mcpServers: mcpServers,
-              },
-              ac.signal,
-            );
+          : await AgentHttpApi.chatCreate(payload, ac.signal);
         const out = await consumeSse(res, activeId);
         await finishStream(out.currentSession || activeId, out.assistant);
+        return true;
       } catch (err) {
-        if (err && err.name !== "AbortError") {
-          message.error(err.message || String(err));
-        }
+        if (err && err.name === "AbortError") return true;
+        message.error((err && err.message) || String(err));
+        return false;
       } finally {
         setStreaming(false);
         abortRef.current = null;
@@ -1137,7 +1280,18 @@
                     e("div", { className: "msg-content" }, renderMarkdown(liveText)),
                   ),
                 )
-              : null,
+              : streaming
+                ? e(
+                    "article",
+                    { className: "msg msg-assistant is-streaming" },
+                    e("div", { className: "msg-role" }, "Agent"),
+                    e(
+                      "div",
+                      { className: "msg-body" },
+                      e("div", { className: "msg-content" }, "正在处理，请稍候…"),
+                    ),
+                  )
+                : null,
             e("div", { ref: bottomRef }),
           ),
           e(
@@ -1145,16 +1299,81 @@
             { className: "composer" },
             e(
               "div",
-              { className: "composer-box" + (streaming ? " is-busy" : "") },
+              {
+                className:
+                  "composer-box" +
+                  (streaming ? " is-busy" : "") +
+                  (dragOver ? " is-drag" : ""),
+                onDragEnter: function (ev) {
+                  ev.preventDefault();
+                  setDragOver(true);
+                },
+                onDragOver: function (ev) {
+                  ev.preventDefault();
+                  if (ev.dataTransfer) ev.dataTransfer.dropEffect = "copy";
+                },
+                onDragLeave: function (ev) {
+                  if (ev.currentTarget.contains(ev.relatedTarget)) return;
+                  setDragOver(false);
+                },
+                onDrop: function (ev) {
+                  ev.preventDefault();
+                  setDragOver(false);
+                  if (ev.dataTransfer) addFiles(ev.dataTransfer.files);
+                },
+              },
+              e("input", {
+                ref: fileInputRef,
+                className: "composer-file-input",
+                type: "file",
+                multiple: true,
+                onChange: function (ev) {
+                  addFiles(ev.target.files);
+                  ev.target.value = "";
+                },
+              }),
+              attachments.length
+                ? e(
+                    "div",
+                    { className: "composer-files" },
+                    attachments.map(function (file) {
+                      return e(
+                        "span",
+                        { key: file.id, className: "file-chip", title: file.name },
+                        e("span", { className: "file-chip-name" }, file.name),
+                        e("span", { className: "file-chip-size" }, formatBytes(file.size)),
+                        e(
+                          "button",
+                          {
+                            type: "button",
+                            className: "file-chip-remove",
+                            title: "移除",
+                            onClick: function () {
+                              removeAttachment(file.id);
+                            },
+                          },
+                          "×",
+                        ),
+                      );
+                    }),
+                  )
+                : null,
               e("textarea", {
                 className: "composer-input",
                 rows: 3,
                 value: prompt,
                 placeholder: streaming
-                  ? "继续输入将作为 steer 注入…"
-                  : "Plan, @ for context, / for commands",
+                  ? "继续输入将作为 steer 注入，也可拖入文件…"
+                  : "输入提示，或拖入 / 粘贴文件",
                 onChange: function (ev) {
                   setPrompt(ev.target.value);
+                },
+                onPaste: function (ev) {
+                  const files = ev.clipboardData && ev.clipboardData.files;
+                  if (files && files.length) {
+                    ev.preventDefault();
+                    addFiles(files);
+                  }
                 },
                 onKeyDown: function (ev) {
                   if (ev.key === "Enter" && !ev.shiftKey) {
@@ -1167,11 +1386,43 @@
                 "div",
                 { className: "composer-toolbar" },
                 e(
-                  "span",
-                  { className: "composer-hint" },
-                  streaming
-                    ? "Enter 发送为 steer · Shift+Enter 换行"
-                    : "Enter 发送 · Shift+Enter 换行",
+                  "div",
+                  { className: "composer-tools" },
+                  e(
+                    "button",
+                    {
+                      type: "button",
+                      className: "composer-attach",
+                      title: "上传文件",
+                      onClick: function () {
+                        if (fileInputRef.current) fileInputRef.current.click();
+                      },
+                    },
+                    e(
+                      "svg",
+                      {
+                        viewBox: "0 0 16 16",
+                        width: 14,
+                        height: 14,
+                        "aria-hidden": "true",
+                      },
+                      e("path", {
+                        d: "M6.2 8.6 9.7 5.1a2.2 2.2 0 0 1 3.1 3.1l-4.6 4.6a3.3 3.3 0 0 1-4.7-4.7l4.4-4.4",
+                        fill: "none",
+                        stroke: "currentColor",
+                        "stroke-width": 1.5,
+                        "stroke-linecap": "round",
+                        "stroke-linejoin": "round",
+                      }),
+                    ),
+                  ),
+                  e(
+                    "span",
+                    { className: "composer-hint" },
+                    streaming
+                      ? "Enter 发送为 steer · 可附文件"
+                      : "Enter 发送 · 图片会压缩后交给模型，附件以随机名保存",
+                  ),
                 ),
                 e(
                   "button",
@@ -1179,7 +1430,7 @@
                     type: "button",
                     className: "composer-send",
                     title: streaming ? "Steer" : "发送",
-                    disabled: !prompt.trim(),
+                    disabled: !prompt.trim() && !attachments.length,
                     onClick: onSend,
                   },
                   e(

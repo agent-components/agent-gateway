@@ -28,29 +28,51 @@ export function buildOpenApiDocument(options?: {
         },
       },
       schemas: {
+        ChatAttachment: {
+          type: "object",
+          required: ["name", "data"],
+          properties: {
+            name: { type: "string", description: "Original file name" },
+            mimeType: { type: "string" },
+            data: {
+              type: "string",
+              description: "Base64 file bytes, or a data URL. All files are stored under AGENT_GATEWAY_UPLOAD_DIR (or {cwd}/.agent-gateway/uploads) with a random filename. Images are compressed before being sent to the model.",
+            },
+          },
+        },
         CreateChatRequest: {
           type: "object",
-          required: ["prompt", "model", "cwd"],
+          required: ["model", "cwd"],
           properties: {
-            prompt: { type: "string" },
+            prompt: { type: "string", description: "Required when attachments is empty" },
             model: { type: "string" },
             cwd: { type: "string" },
             name: { type: "string" },
             mode: { type: "string" },
             mcpServers: { type: "object", additionalProperties: true },
             providerOptions: { type: "object", additionalProperties: true },
+            attachments: {
+              type: "array",
+              maxItems: 8,
+              items: { $ref: "#/components/schemas/ChatAttachment" },
+            },
           },
         },
         ResumeChatRequest: {
           type: "object",
-          required: ["sessionId", "prompt"],
+          required: ["sessionId"],
           properties: {
             sessionId: { type: "string" },
-            prompt: { type: "string" },
+            prompt: { type: "string", description: "Required when attachments is empty" },
             model: { type: "string" },
             cwd: { type: "string" },
             mcpServers: { type: "object", additionalProperties: true },
             providerOptions: { type: "object", additionalProperties: true },
+            attachments: {
+              type: "array",
+              maxItems: 8,
+              items: { $ref: "#/components/schemas/ChatAttachment" },
+            },
           },
         },
         ConnectChatRequest: {
@@ -63,10 +85,16 @@ export function buildOpenApiDocument(options?: {
         },
         SteerChatRequest: {
           type: "object",
-          required: ["sessionId", "text"],
+          required: ["sessionId"],
           properties: {
             sessionId: { type: "string" },
-            text: { type: "string" },
+            text: { type: "string", description: "Required when attachments is empty" },
+            cwd: { type: "string", description: "Required when attachments is set" },
+            attachments: {
+              type: "array",
+              maxItems: 8,
+              items: { $ref: "#/components/schemas/ChatAttachment" },
+            },
           },
         },
         CancelChatRequest: {
@@ -80,6 +108,7 @@ export function buildOpenApiDocument(options?: {
           type: "object",
           properties: {
             outcome: { type: "string" },
+            text: { type: "string", description: "Text actually injected" },
           },
         },
         Error: {

@@ -74,6 +74,13 @@ export interface ModelInfo {
   name?: string;
 }
 
+/** Base64 file attached to a chat turn. `data` is raw base64 or a data URL. */
+export interface ChatAttachment {
+  name: string;
+  mimeType?: string;
+  data: string;
+}
+
 export interface CreateChatRequest {
   prompt: string;
   model: string;
@@ -82,6 +89,7 @@ export interface CreateChatRequest {
   mode?: string;
   mcpServers?: Record<string, unknown>;
   providerOptions?: Record<string, unknown>;
+  attachments?: ChatAttachment[];
 }
 
 export interface ResumeChatRequest {
@@ -91,6 +99,7 @@ export interface ResumeChatRequest {
   cwd?: string;
   mcpServers?: Record<string, unknown>;
   providerOptions?: Record<string, unknown>;
+  attachments?: ChatAttachment[];
 }
 
 export interface ConnectChatRequest {
@@ -101,6 +110,8 @@ export interface ConnectChatRequest {
 export interface SteerChatRequest {
   sessionId: string;
   text: string;
+  cwd?: string;
+  attachments?: ChatAttachment[];
 }
 
 export interface CancelChatRequest {
@@ -109,6 +120,8 @@ export interface CancelChatRequest {
 
 export interface SteerResult {
   outcome: string;
+  /** Text actually injected, including attachment notes when files were saved. */
+  text?: string;
 }
 
 export interface ProviderContext {

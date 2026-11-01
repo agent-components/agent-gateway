@@ -46,7 +46,8 @@
       const err = await response.json().catch(function () {
         return {};
       });
-      throw new Error(err.error || response.statusText || "request failed");
+      const detail = Array.isArray(err.message) ? err.message.join("; ") : err.message;
+      throw new Error(detail || err.error || response.statusText || "request failed");
     }
     if (!response.body) throw new Error("no response body");
 
