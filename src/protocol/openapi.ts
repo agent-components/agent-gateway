@@ -155,6 +155,24 @@ export function buildOpenApiDocument(options?: {
               description: "SSE stream",
               content: { "text/event-stream": { schema: { type: "string" } } },
             },
+            "409": {
+              description: "Session already has an active run. Use connect, steer, or cancel first.",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      statusCode: { type: "integer", example: 409 },
+                      message: { type: "string" },
+                      error: { type: "string", example: "Conflict" },
+                      code: { type: "string", example: "session_busy" },
+                      sessionId: { type: "string" },
+                      runId: { type: "string" },
+                    },
+                  },
+                },
+              },
+            },
             "401": { description: "Unauthorized", content: { "application/json": { schema: { $ref: "#/components/schemas/Error" } } } },
           },
         },

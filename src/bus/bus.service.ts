@@ -1,4 +1,5 @@
 import { Injectable } from "@nestjs/common";
+import { sessionBusyError } from "../common/session-busy.js";
 import type { BusEvent, RunStream, SteerResult } from "../protocol/types.js";
 
 export interface ActiveRun {
@@ -31,7 +32,7 @@ export class RunEventBus {
   attach(stream: RunStream): ActiveRun {
     const existing = this.bySession.get(stream.sessionId);
     if (existing && !existing.finished) {
-      throw new Error(`Session ${stream.sessionId} already has an active run`);
+      throw sessionBusyError(stream.sessionId, existing.runId);
     }
 
     const run: ActiveRun = {

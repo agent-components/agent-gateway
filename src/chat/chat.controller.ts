@@ -11,6 +11,7 @@ import {
 import type { Response } from "express";
 import { RunEventBus } from "../bus/bus.service.js";
 import { prepareAttachments } from "../common/attachments.js";
+import { isSessionBusyError, sessionBusyError } from "../common/session-busy.js";
 import { pipeRunToSse } from "../common/sse.js";
 import { TokenGuard } from "../common/token.guard.js";
 import { AGENT_PROVIDER, type AgentHttpProvider } from "../config/tokens.js";
@@ -27,6 +28,19 @@ function hasAttachments(body: { attachments?: unknown[] } | undefined): boolean 
 }
 
 function rethrowClientError(err: unknown): never {
+  if (isSessionBusyError(err)) {
+    throw new HttpException(
+      {
+        statusCode: HttpStatus.CONFLICT,
+        message: err.message,
+        error: "Conflict",
+        code: err.code,
+        sessionId: err.sessionId,
+        ...(err.runId ? { runId: err.runId } : {}),
+      },
+      HttpStatus.CONFLICT,
+    );
+  }
   const status =
     typeof err === "object" && err !== null && "status" in err
       ? Number((err as { status: unknown }).status)
@@ -72,13 +86,23 @@ export class ChatController {
     if (!body.prompt?.trim() && !hasAttachments(body)) {
       throw new HttpException("prompt or attachments are required", HttpStatus.BAD_REQUEST);
     }
+    const active = this.bus.getBySession(body.sessionId);
+    if (active && !active.finished) {
+      rethrowClientError(sessionBusyError(body.sessionId, active.runId));
+    }
     let stream;
     try {
       stream = await this.provider.resume(body, {});
     } catch (err) {
       rethrowClientError(err);
     }
-    const run = this.bus.attach(stream);
+    let run;
+    try {
+      run = this.bus.attach(stream);
+    } catch (err) {
+      await stream.dispose?.();
+      rethrowClientError(err);
+    }
     await pipeRunToSse(res, this.bus, run);
   }
 

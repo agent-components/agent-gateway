@@ -1,6 +1,7 @@
 import { Agent, AgentNotFoundError, Cursor, type SDKUserMessage } from "@cursor/sdk";
 import { SqliteLocalAgentStore } from "@cursor/sdk/sqlite";
 import { prepareAttachments } from "../../common/attachments.js";
+import { sessionBusyError } from "../../common/session-busy.js";
 import type {
   AgentHttpProvider,
   CancelChatRequest,
@@ -99,6 +100,14 @@ function isMissingAgentCache(err: unknown): boolean {
   if (value.name === "AgentNotFoundError" || value.code === "agent_not_found") return true;
   if (typeof value.message === "string" && /agent\b.+\bnot found/i.test(value.message)) return true;
   return isMissingAgentCache(value.cause);
+}
+
+function isAgentBusy(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const value = err as { name?: string; code?: string; message?: string; cause?: unknown };
+  if (value.name === "AgentBusyError" || value.code === "agent_busy") return true;
+  if (typeof value.message === "string" && /already has active run/i.test(value.message)) return true;
+  return value.cause && value.cause !== err ? isAgentBusy(value.cause) : false;
 }
 
 function missingAgentCacheError(sessionId: string, cwd: string): Error {
@@ -204,6 +213,7 @@ export function createCursorProvider(): AgentHttpProvider {
         });
       } catch (err) {
         await agent[Symbol.asyncDispose]?.();
+        if (isAgentBusy(err)) throw sessionBusyError(req.sessionId);
         throw err;
       }
     },
