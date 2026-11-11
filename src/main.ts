@@ -35,6 +35,10 @@ async function bootstrap(): Promise<void> {
   });
 
   await app.listen(port, host);
+  const server = app.getHttpServer();
+  server.timeout = 0;
+  server.requestTimeout = 0;
+  server.headersTimeout = 0;
 
   const url = `http://${host}:${port}`;
   console.log("");

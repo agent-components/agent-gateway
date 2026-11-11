@@ -1,5 +1,6 @@
 import { Injectable } from "@nestjs/common";
 import { sessionBusyError } from "../common/session-busy.js";
+import { explainStreamError } from "../common/stream-error.js";
 import type { BusEvent, RunStream, SteerResult } from "../protocol/types.js";
 
 export interface ActiveRun {
@@ -61,8 +62,7 @@ export class RunEventBus {
       }
       if (!run.finished) this.publish(run, { kind: "done" });
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.publish(run, { kind: "error", data: { message } });
+      this.publish(run, { kind: "error", data: explainStreamError(err) });
       this.publish(run, { kind: "done" });
     } finally {
       run.finished = true;

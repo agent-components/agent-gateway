@@ -1,4 +1,5 @@
 import type { SDKMessage } from "@cursor/sdk";
+import { explainStreamError } from "../../common/stream-error.js";
 import type { BusEvent, StreamMessage } from "../../protocol/types.js";
 
 /**
@@ -114,8 +115,7 @@ export async function* sdkStreamToBusEvents(
     };
     yield { kind: "done" };
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    yield { kind: "error", data: { message } };
+    yield { kind: "error", data: explainStreamError(err) };
     yield { kind: "done" };
   }
 }

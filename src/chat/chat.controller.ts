@@ -12,7 +12,8 @@ import type { Response } from "express";
 import { RunEventBus } from "../bus/bus.service.js";
 import { prepareAttachments } from "../common/attachments.js";
 import { isSessionBusyError, sessionBusyError } from "../common/session-busy.js";
-import { pipeRunToSse } from "../common/sse.js";
+import { endSseWithError, openSse, pipeRunToSse } from "../common/sse.js";
+import { explainStreamError } from "../common/stream-error.js";
 import { TokenGuard } from "../common/token.guard.js";
 import { AGENT_PROVIDER, type AgentHttpProvider } from "../config/tokens.js";
 import type {
@@ -25,6 +26,23 @@ import type {
 
 function hasAttachments(body: { attachments?: unknown[] } | undefined): boolean {
   return Array.isArray(body?.attachments) && body.attachments.length > 0;
+}
+
+function streamFailure(err: unknown): {
+  message: string;
+  code?: string;
+  sessionId?: string;
+  runId?: string;
+} {
+  if (isSessionBusyError(err)) {
+    return {
+      message: err.message,
+      code: err.code,
+      sessionId: err.sessionId,
+      ...(err.runId ? { runId: err.runId } : {}),
+    };
+  }
+  return explainStreamError(err);
 }
 
 function rethrowClientError(err: unknown): never {
@@ -68,14 +86,23 @@ export class ChatController {
     if (!body.prompt?.trim() && !hasAttachments(body)) {
       throw new HttpException("prompt or attachments are required", HttpStatus.BAD_REQUEST);
     }
+    const stopHeartbeat = openSse(res);
     let stream;
     try {
       stream = await this.provider.create(body, {});
     } catch (err) {
-      rethrowClientError(err);
+      endSseWithError(res, stopHeartbeat, streamFailure(err));
+      return;
     }
-    const run = this.bus.attach(stream);
-    await pipeRunToSse(res, this.bus, run);
+    let run;
+    try {
+      run = this.bus.attach(stream);
+    } catch (err) {
+      await stream.dispose?.();
+      endSseWithError(res, stopHeartbeat, streamFailure(err));
+      return;
+    }
+    await pipeRunToSse(res, this.bus, run, stopHeartbeat);
   }
 
   @Post("resume")
@@ -90,20 +117,23 @@ export class ChatController {
     if (active && !active.finished) {
       rethrowClientError(sessionBusyError(body.sessionId, active.runId));
     }
+    const stopHeartbeat = openSse(res);
     let stream;
     try {
       stream = await this.provider.resume(body, {});
     } catch (err) {
-      rethrowClientError(err);
+      endSseWithError(res, stopHeartbeat, streamFailure(err));
+      return;
     }
     let run;
     try {
       run = this.bus.attach(stream);
     } catch (err) {
       await stream.dispose?.();
-      rethrowClientError(err);
+      endSseWithError(res, stopHeartbeat, streamFailure(err));
+      return;
     }
-    await pipeRunToSse(res, this.bus, run);
+    await pipeRunToSse(res, this.bus, run, stopHeartbeat);
   }
 
   @Post("connect")
