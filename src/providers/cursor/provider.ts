@@ -174,6 +174,7 @@ export function createCursorProvider(): AgentHttpProvider {
         model: { id: req.model },
         name: req.name,
         mcpServers: asMcpServers(req.mcpServers) as never,
+        ...(req.agents ? { agents: req.agents as never } : {}),
         local: {
           cwd: req.cwd,
           ...(req.providerOptions?.local as object | undefined),
@@ -195,7 +196,11 @@ export function createCursorProvider(): AgentHttpProvider {
           apiKey,
           ...(req.model ? { model: { id: req.model } } : {}),
           mcpServers: asMcpServers(req.mcpServers) as never,
-          local: { cwd },
+          ...(req.agents ? { agents: req.agents as never } : {}),
+          local: {
+            cwd,
+            ...(req.providerOptions?.local as object | undefined),
+          },
         })) as unknown as DisposableAgent;
       } catch (err) {
         if (isMissingAgentCache(err)) throw missingAgentCacheError(req.sessionId, cwd);

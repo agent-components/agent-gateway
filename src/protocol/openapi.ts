@@ -50,6 +50,7 @@ export function buildOpenApiDocument(options?: {
             name: { type: "string" },
             mode: { type: "string" },
             mcpServers: { type: "object", additionalProperties: true },
+            agents: { type: "object", additionalProperties: true },
             providerOptions: { type: "object", additionalProperties: true },
             attachments: {
               type: "array",
@@ -67,6 +68,7 @@ export function buildOpenApiDocument(options?: {
             model: { type: "string" },
             cwd: { type: "string" },
             mcpServers: { type: "object", additionalProperties: true },
+            agents: { type: "object", additionalProperties: true },
             providerOptions: { type: "object", additionalProperties: true },
             attachments: {
               type: "array",

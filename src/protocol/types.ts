@@ -88,6 +88,7 @@ export interface CreateChatRequest {
   name?: string;
   mode?: string;
   mcpServers?: Record<string, unknown>;
+  agents?: Record<string, unknown>;
   providerOptions?: Record<string, unknown>;
   attachments?: ChatAttachment[];
 }
@@ -98,6 +99,7 @@ export interface ResumeChatRequest {
   model?: string;
   cwd?: string;
   mcpServers?: Record<string, unknown>;
+  agents?: Record<string, unknown>;
   providerOptions?: Record<string, unknown>;
   attachments?: ChatAttachment[];
 }

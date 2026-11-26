@@ -91,6 +91,7 @@ Provider 级（按需选填，由对应 Provider 自行读取，多选一即可�
 | `name` | string | | 会话名 |
 | `mode` | string | | 如 `agent` / `plan`（视 Provider） |
 | `mcpServers` | object | | MCP 服务配置 map |
+| `agents` | object | | 子 agent 定义，透传给 SDK `Agent.create` 的 `agents` |
 | `providerOptions` | object | | Provider 扩展参数 |
 | `attachments` | array | | 上传文件，见下。最多 8 个，单文件 ≤ 20MB，合计 ≤ 20MB |
 
@@ -103,6 +104,7 @@ Provider 级（按需选填，由对应 Provider 自行读取，多选一即可�
 | `model` | string | | 模型 id |
 | `cwd` | string | | 工作区。带附件时文件会写到这里 |
 | `mcpServers` | object | | MCP |
+| `agents` | object | | 子 agent 定义，透传给 SDK `Agent.resume` 的 `agents` |
 | `providerOptions` | object | | 扩展参数 |
 | `attachments` | array | | 同 create |
 
