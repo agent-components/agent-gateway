@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 import { randomBytes } from "node:crypto";
 import "reflect-metadata";
+import { Logger } from "@nestjs/common";
 import { NestFactory } from "@nestjs/core";
 import type { NestExpressApplication } from "@nestjs/platform-express";
+import type { NextFunction, Request, Response } from "express";
 import { AppModule } from "./app.module.js";
 
 function ensureToken(): string {
@@ -27,6 +29,19 @@ async function bootstrap(): Promise<void> {
   // Base64 attachments: 20MB of files expands to roughly 27MB of JSON.
   app.useBodyParser("json", { limit: "40mb" });
   app.useBodyParser("urlencoded", { limit: "40mb" });
+
+  const httpLogger = new Logger("HTTP");
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    if (!req.path.startsWith("/api/")) return next();
+    const started = Date.now();
+    httpLogger.log(`-> ${req.method} ${req.path}`);
+    res.on("close", () => {
+      httpLogger.log(
+        `<- ${req.method} ${req.path} ${res.statusCode} ${Date.now() - started}ms`,
+      );
+    });
+    next();
+  });
 
   app.enableCors({
     origin: "*",

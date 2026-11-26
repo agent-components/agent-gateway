@@ -1,5 +1,6 @@
 import { Agent, AgentNotFoundError, Cursor, type SDKUserMessage } from "@cursor/sdk";
 import { SqliteLocalAgentStore } from "@cursor/sdk/sqlite";
+import { Logger } from "@nestjs/common";
 import { prepareAttachments } from "../../common/attachments.js";
 import { sessionBusyError } from "../../common/session-busy.js";
 import type {
@@ -125,6 +126,8 @@ function notActive(): never {
 }
 
 export function createCursorProvider(): AgentHttpProvider {
+  const log = new Logger("cursor");
+
   async function buildRunStream(
     agent: DisposableAgent,
     message: string | SDKUserMessage,
@@ -133,6 +136,7 @@ export function createCursorProvider(): AgentHttpProvider {
     const run = await agent.send(message, sendOpts);
     const sessionId = agent.agentId;
     const runId = run.id;
+    log.log(`run started session=${sessionId} run=${runId}`);
 
     return {
       sessionId,
@@ -165,6 +169,9 @@ export function createCursorProvider(): AgentHttpProvider {
 
     async create(req: CreateChatRequest, _ctx: ProviderContext): Promise<RunStream> {
       const apiKey = requireApiKey();
+      log.log(
+        `create model=${req.model} cwd=${req.cwd} promptLen=${(req.prompt ?? "").length} attachments=${req.attachments?.length ?? 0}`,
+      );
       const prepared = await prepareAttachments(req.cwd, req.prompt ?? "", req.attachments);
       const message: string | SDKUserMessage = prepared.images.length
         ? { text: prepared.text, images: prepared.images }
@@ -181,6 +188,7 @@ export function createCursorProvider(): AgentHttpProvider {
         },
         ...(req.mode ? { mode: req.mode as "agent" | "plan" } : {}),
       })) as unknown as DisposableAgent;
+      log.log(`agent created session=${agent.agentId}`);
 
       return buildRunStream(agent, message, {
         ...(req.providerOptions?.send as object | undefined),
@@ -190,6 +198,9 @@ export function createCursorProvider(): AgentHttpProvider {
     async resume(req: ResumeChatRequest, _ctx: ProviderContext): Promise<RunStream> {
       const apiKey = requireApiKey();
       const cwd = req.cwd ?? process.cwd();
+      log.log(
+        `resume session=${req.sessionId} cwd=${cwd} promptLen=${(req.prompt ?? "").length} attachments=${req.attachments?.length ?? 0}`,
+      );
       let agent: DisposableAgent;
       try {
         agent = (await Agent.resume(req.sessionId, {

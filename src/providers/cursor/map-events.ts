@@ -1,6 +1,9 @@
 import type { SDKMessage } from "@cursor/sdk";
+import { Logger } from "@nestjs/common";
 import { explainStreamError } from "../../common/stream-error.js";
 import type { BusEvent, StreamMessage } from "../../protocol/types.js";
+
+const log = new Logger("cursor");
 
 /**
  * Map Cursor SDKMessage into the unified stream envelope.
@@ -98,6 +101,9 @@ export async function* sdkStreamToBusEvents(
       yield { kind: "message", data: mapSdkMessage(event, sessionId, runId) };
     }
     const result = await wait();
+    log.log(
+      `run ${runId} ${result.status}${result.error ? ` error=${result.error.message}` : ""} duration=${result.durationMs ?? "?"}ms`,
+    );
     const model =
       typeof result.model === "string" ? result.model : result.model?.id;
     yield {
@@ -115,7 +121,9 @@ export async function* sdkStreamToBusEvents(
     };
     yield { kind: "done" };
   } catch (err) {
-    yield { kind: "error", data: explainStreamError(err) };
+    const failure = explainStreamError(err);
+    log.error(`run ${runId} failed: ${failure.message}`);
+    yield { kind: "error", data: failure };
     yield { kind: "done" };
   }
 }
